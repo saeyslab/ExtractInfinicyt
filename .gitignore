@@ -1,1 +1,3 @@
 *.class
+temp_dir_*
+*.cyt
