@@ -1,7 +1,7 @@
 library(flowCore)
 
 extract_infinicyt <- function(filepath, 
-                              java_executable_path = "C:\\Program Files\\Java\\jdk-22\\bin\\java",
+                              java_executable_path = "C:\\Program Files\\Java\\jdk-25\\bin\\java",
                               java_class_files_path = "java",
                               remove_temp_dir = TRUE, 
                               verbose = TRUE) {
@@ -13,22 +13,39 @@ extract_infinicyt <- function(filepath,
   if (verbose){ message("Loading XML and FCS") }
   fcs_filepath <- paste0(tempdir, "/", list.files(tempdir, pattern = ".fcs"))
   binary_filepath <- paste0(tempdir, "\\", list.files(tempdir, pattern = ".pr$"))
+  
+  pr_file <- normalizePath(binary_filepath, winslash = "\\", mustWork = TRUE)
+  # java_class_files_path should point to the directory that contains the `fcs` folder
+  classpath_root <- normalizePath(java_class_files_path, winslash = "\\", mustWork = FALSE)
+  if (!file.exists(classpath_root)) {
+    # If relative 'java' folder inside project, try relative path
+    classpath_root <- file.path(getwd(), java_class_files_path)
+  }
 
   o <- capture.output(ff_agg <- suppressWarnings(flowCore::read.FCS(fcs_filepath, truncate_max_range = FALSE)))
   
   flowlist <- extract_flowframes(ff_agg, verbose = verbose)
   names(flowlist) <- sapply(flowlist, function(x) x$name)
   
-  java_command <- paste0('cd ', java_class_files_path, ' & ',
-                         java_class_files_path, ' fcs.reader.PRReader ', 
-                         #'"..\\', binary_filepath, '"')
-                         '"', gsub("/","\\\\", getwd()), "\\", binary_filepath, '"')
-  if (verbose) { message("Running ", java_command) }
-  java_res <- shell(java_command, intern = TRUE)
+  # Run java with -cp <classpath_root> fcs.reader.PRReader "<pr_file>"
+  java_args <- c("-cp", classpath_root, "fcs.reader.PRReader", pr_file)
   
+  if (verbose) {
+    message("Running Java: ", paste(shQuote(java_executable_path), paste(shQuote(java_args), collapse = " "), collapse = " "))
+  }
   
+  # use system2 to capture stdout and stderr
+  java_res <- tryCatch({
+    system2(java_executable_path, args = java_args, stdout = TRUE, stderr = TRUE)
+  }, error = function(e){
+    stop("Failed to run java: ", conditionMessage(e))
+  })
   
-  
+  # Check if java produced anything or returned an error message
+  if (length(java_res) == 0 || any(grepl("Exception|Error|Could not find or load main class|NoClassDefFoundError|ClassNotFoundException", java_res, ignore.case = TRUE))) {
+    stop("Java PRReader failed. Captured output:\n", paste(java_res, collapse = "\n"))
+  }
+
   empty_lines <- which(java_res == "")
   
   celllabel_lines <- (empty_lines[1]+3) : (empty_lines[2]-1)
