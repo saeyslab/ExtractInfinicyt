@@ -196,7 +196,7 @@ public class PRReader {
     } else {
       try {
         for (; true; numDatos++) {
-          Integer key = new Integer(in.readInt());
+          Integer key = Integer.valueOf(in.readInt());
           List<Integer> events = cpopulationsIListaEvents.get(key);
           if (events == null) {
             events = new ArrayList<>();
