@@ -6,6 +6,10 @@ extract_infinicyt <- function(filepath,
                               remove_temp_dir = TRUE, 
                               verbose = TRUE) {
   tempdir <- paste0("temp_dir_", as.numeric(Sys.time()))
+  
+  # Trying out tempdir creation to be able to remove it as well 
+  dir.create(tempdir)
+  
   if (verbose){message("Unzipping file to ", tempdir)}
   unzip(filepath, exdir = tempdir)
   
