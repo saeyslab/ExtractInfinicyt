@@ -4,6 +4,7 @@ extract_infinicyt <- function(filepath,
                               java_executable_path = "C:\\Program Files\\Java\\jdk-25\\bin\\java",
                               java_class_files_path = "java",
                               remove_temp_dir = TRUE, 
+                              compensate_transform = TRUE,
                               verbose = TRUE) {
   tempdir <- paste0("temp_dir_", as.numeric(Sys.time()))
   
@@ -28,7 +29,8 @@ extract_infinicyt <- function(filepath,
 
   o <- capture.output(ff_agg <- suppressWarnings(flowCore::read.FCS(fcs_filepath, truncate_max_range = FALSE)))
   
-  flowlist <- extract_flowframes(ff_agg, verbose = verbose)
+  flowlist <- extract_flowframes(ff_agg, verbose = verbose, 
+                                 compensate_transform = compensate_transform)
   names(flowlist) <- sapply(flowlist, function(x) x$name)
   
   # Run java with -cp <classpath_root> fcs.reader.PRReader "<pr_file>"
@@ -95,7 +97,7 @@ extract_infinicyt <- function(filepath,
 }
 
 
-extract_flowframes <- function(ff_agg, verbose = TRUE){
+extract_flowframes <- function(ff_agg, verbose = TRUE, compensate_transform = TRUE){
   
   # If marker name in description, add to column name (as stored in gates, spillover, ...)
   # and remove numbers added by flowcore to create unique colnames
@@ -107,8 +109,6 @@ extract_flowframes <- function(ff_agg, verbose = TRUE){
   }
   
   if(!is.null(ff_agg@description$INFCYT)){
-    # Extract infinicyt aggregate information such as number of files, 
-    # cell counts and filenames
     infcyt_keyword <- unlist(strsplit(ff_agg@description$INFCYT, ";"))
     n_files <- as.numeric(infcyt_keyword[3])
     cell_counts <- as.numeric(infcyt_keyword[4:(3+n_files)])
@@ -116,53 +116,55 @@ extract_flowframes <- function(ff_agg, verbose = TRUE){
     
     if(length(filenames) == 0) filenames <- paste("File", seq(n_files))
     
-    # Derive file_ids from number of cells per file
     file_id <- rep(seq_len(n_files), times = cell_counts)
-  } else { # Assume only one file
+  } else {
     filenames <- ff_agg@description$GUID
     file_id <- rep(1, nrow(ff_agg))
   }
   
-  # Build list with all separate flow frames
   flowlist <- list()
   for(i in seq_along(filenames)){
     if(verbose) message("Extracting ", filenames[i])
     
     subset <- ff_agg[file_id == i,]
     
-    # Remove fully missing columns (not present in panel)
     subset_cols <- apply(exprs(subset), 2, function(x)!all(is.na(x)))
     subset <- subset[, subset_cols]
-    # Remove any rows which have an NA value
     subset_rows <- apply(exprs(subset), 1, function(x)!any(is.na(x)))
     subset <- subset[subset_rows, ]
     
-    # Extract spillover matrix
     spill <- get_spillover(ff_agg, i)
     spill_cols <- intersect(names(which(subset_cols)), colnames(spill))
     spill_subset <- spill[spill_cols, spill_cols]
     keyword(subset)[["SPILL"]] <- spill_subset
     keyword(subset)[["GUID"]] <- filenames[i]
     
-    # Compensate and transform
-    new_ff_c <- flowCore::compensate(subset, spill_subset)
-    new_ff_tfList <- tryCatch(
-      {
-        flowCore::estimateLogicle(new_ff_c, colnames(spill_subset))
-      },
-      error = function(e) {
-        warning("Default logicle parameters for ", filenames[i])
-        flowCore::transformList( colnames(spill_subset), 
-                                 flowCore::logicleTransform())
-      }
-    )
-    new_ff_t <- flowCore::transform(new_ff_c, new_ff_tfList)
-    
-    flowlist[[filenames[i]]] <-  list(
-      "name" = filenames[[i]],
-      "ff" = new_ff_t,
-      "transform_list" = new_ff_tfList
-    )
+    if (compensate_transform) {
+      # Compensate and transform
+      new_ff_c <- flowCore::compensate(subset, spill_subset)
+      new_ff_tfList <- tryCatch(
+        {
+          flowCore::estimateLogicle(new_ff_c, colnames(spill_subset))
+        },
+        error = function(e) {
+          warning("Default logicle parameters for ", filenames[i])
+          flowCore::transformList(colnames(spill_subset), 
+                                  flowCore::logicleTransform())
+        }
+      )
+      new_ff_t <- flowCore::transform(new_ff_c, new_ff_tfList)
+      
+      flowlist[[filenames[i]]] <- list(
+        "name"           = filenames[[i]],
+        "ff"             = new_ff_t,
+        "transform_list" = new_ff_tfList
+      )
+    } else {
+      flowlist[[filenames[i]]] <- list(
+        "name" = filenames[[i]],
+        "ff"   = subset
+      )
+    }
   }
   return(flowlist)
 }
