@@ -1,3 +1,6 @@
 *.class
 temp_dir_*
 *.cyt
+.Rproj.user
+*.Rproj
+.vscode/
